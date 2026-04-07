@@ -5,4 +5,4 @@ nixPkgs = ["nodejs_22"]
 cmds = ["npm install"]
 
 [start]
-cmd = "node src/index.js"
+cmd = "node --experimental-sqlite src/index.js"
