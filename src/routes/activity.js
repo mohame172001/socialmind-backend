@@ -61,4 +61,40 @@ router.get('/queue', (req, res) => {
   res.json(queue.getStats());
 });
 
+// POST /api/activity/chat - voice agent (Arabic)
+router.post('/chat', async (req, res) => {
+  const { command, history = [] } = req.body;
+  if (!command) return res.status(400).json({ error: 'command required' });
+
+  const apiKey = db.prepare('SELECT value FROM settings WHERE key=?').get('anthropic_api_key')?.value;
+  if (!apiKey) return res.json({ response: 'مفيش API key. روح Settings وأضفه.' });
+
+  const accounts = db.prepare('SELECT platform, username FROM accounts WHERE is_active=1').all();
+  const stats    = db.prepare(`SELECT
+    COUNT(CASE WHEN status='sent'   AND created_at>(unixepoch()-86400) THEN 1 END) s,
+    COUNT(CASE WHEN status='failed' AND created_at>(unixepoch()-86400) THEN 1 END) f,
+    COUNT(CASE WHEN status='pending' THEN 1 END) p FROM activity_log`).get();
+
+  const accText = accounts.length
+    ? accounts.map(a=>`@${a.username}(${a.platform})`).join(', ')
+    : 'لا يوجد حسابات بعد';
+
+  const system = `أنت "ميندي"، مساعد ذكي ومتفاعل لتطبيق SocialMind.
+تتكلم عربي مصري بشكل طبيعي وودود مع سيدي.
+الحسابات: ${accText} | أُرسل اليوم: ${stats?.s||0} | فشل: ${stats?.f||0} | انتظار: ${stats?.p||0}
+رد بشكل طبيعي على أي سؤال - سواء عن التطبيق أو أي حاجة تانية.`;
+
+  try {
+    const Anthropic = require('@anthropic-ai/sdk');
+    const msgs = [...history.slice(-10), { role:'user', content:command }];
+    const out  = await new Anthropic({ apiKey }).messages.create({
+      model:'claude-haiku-4-5-20251001', max_tokens:400, system, messages:msgs
+    });
+    res.json({ response: out.content[0].text.trim() });
+  } catch(e) {
+    console.error('chat:', e.message);
+    res.status(500).json({ response: 'حصل خطأ، جرب تاني.' });
+  }
+});
+
 module.exports = router;
