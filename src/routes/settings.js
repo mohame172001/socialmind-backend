@@ -9,7 +9,11 @@ const ALLOWED_KEYS = [
   'min_delay_seconds',
   'max_delay_seconds',
   'max_replies_per_hour',
-  'user_cooldown_minutes'
+  'user_cooldown_minutes',
+  'meta_app_id',
+  'meta_app_secret',
+  'tiktok_client_key',
+  'tiktok_client_secret'
 ];
 
 // GET all settings (mask API key)
@@ -17,8 +21,9 @@ router.get('/', (req, res) => {
   const rows = db.prepare('SELECT key, value FROM settings').all();
   const settings = {};
   for (const row of rows) {
-    if (row.key === 'anthropic_api_key' && row.value) {
-      settings[row.key] = row.value.substring(0, 8) + '...' + row.value.slice(-4);
+    const MASKED = ['anthropic_api_key', 'meta_app_secret', 'tiktok_client_secret'];
+    if (MASKED.includes(row.key) && row.value) {
+      settings[row.key] = row.value.substring(0, 4) + '...' + row.value.slice(-4);
     } else {
       settings[row.key] = row.value;
     }

@@ -108,6 +108,10 @@ db.transaction = function(fn) {
 // Insert default settings if not exist
 const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
 insertSetting.run('anthropic_api_key', '');
+insertSetting.run('meta_app_id', '');
+insertSetting.run('meta_app_secret', '');
+insertSetting.run('tiktok_client_key', '');
+insertSetting.run('tiktok_client_secret', '');
 insertSetting.run('ai_prompt_template', 'You are a friendly social media assistant. Reply to this comment in a helpful, engaging way. Keep it under 150 characters. Comment: {{comment}}');
 insertSetting.run('min_delay_seconds', '45');
 insertSetting.run('max_delay_seconds', '120');

@@ -32,6 +32,7 @@ app.use('/api/accounts', require('./routes/accounts'));
 app.use('/api/rules', require('./routes/rules'));
 app.use('/api/activity', require('./routes/activity'));
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/oauth', require('./routes/oauth'));
 
 // Webhook routes
 app.use('/webhooks/instagram', require('./webhooks/instagram'));
