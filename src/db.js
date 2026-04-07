@@ -1,22 +1,18 @@
-const { DatabaseSync } = require('node:sqlite');
+const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../data/socialmind.db');
 
-// Ensure data directory exists
 const dataDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const db = new DatabaseSync(DB_PATH);
+const db = new Database(DB_PATH);
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
 
-// Enable WAL mode and foreign keys
-db.exec('PRAGMA journal_mode = WAL');
-db.exec('PRAGMA foreign_keys = ON');
-
-// Initialize schema
 db.exec(`
   CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
@@ -90,32 +86,16 @@ db.exec(`
   );
 `);
 
-// Add a transaction helper to match better-sqlite3 API
-db.transaction = function(fn) {
-  return function(...args) {
-    db.exec('BEGIN');
-    try {
-      const result = fn(...args);
-      db.exec('COMMIT');
-      return result;
-    } catch (err) {
-      db.exec('ROLLBACK');
-      throw err;
-    }
-  };
-};
-
-// Insert default settings if not exist
 const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
 insertSetting.run('anthropic_api_key', '');
-insertSetting.run('meta_app_id', '');
-insertSetting.run('meta_app_secret', '');
-insertSetting.run('tiktok_client_key', '');
-insertSetting.run('tiktok_client_secret', '');
 insertSetting.run('ai_prompt_template', 'You are a friendly social media assistant. Reply to this comment in a helpful, engaging way. Keep it under 150 characters. Comment: {{comment}}');
 insertSetting.run('min_delay_seconds', '45');
 insertSetting.run('max_delay_seconds', '120');
 insertSetting.run('max_replies_per_hour', '30');
 insertSetting.run('user_cooldown_minutes', '60');
+insertSetting.run('meta_app_id', '');
+insertSetting.run('meta_app_secret', '');
+insertSetting.run('tiktok_client_key', '');
+insertSetting.run('tiktok_client_secret', '');
 
 module.exports = db;
