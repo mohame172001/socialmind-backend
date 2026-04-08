@@ -65,9 +65,19 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
+  const db = require('./db');
+  const getVal = (k) => { const r = db.prepare('SELECT value FROM settings WHERE key = ?').get(k); return r?.value || ''; };
+
   console.log(`\n🚀 SocialMind Backend running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
-  console.log(`🔗 Webhook info: http://localhost:${PORT}/webhooks\n`);
+  console.log(`🔗 Webhook info: http://localhost:${PORT}/webhooks`);
+  console.log(`\n─── Config Status ───`);
+  console.log(`  META_APP_ID:       ${getVal('meta_app_id') ? '✅ SET' : '❌ MISSING'} (env: ${process.env.META_APP_ID ? 'YES' : 'no'})`);
+  console.log(`  META_APP_SECRET:   ${getVal('meta_app_secret') ? '✅ SET' : '❌ MISSING'} (env: ${process.env.META_APP_SECRET ? 'YES' : 'no'})`);
+  console.log(`  ANTHROPIC_API_KEY: ${getVal('anthropic_api_key') ? '✅ SET' : '❌ MISSING'} (env: ${process.env.ANTHROPIC_API_KEY ? 'YES' : 'no'})`);
+  console.log(`  FRONTEND_URL:      ${process.env.FRONTEND_URL || '(default: http://localhost:5173)'}`);
+  console.log(`  RAILWAY_DOMAIN:    ${process.env.RAILWAY_PUBLIC_DOMAIN || '(local mode)'}`);
+  console.log(`─────────────────────\n`);
 });
 
 module.exports = app;

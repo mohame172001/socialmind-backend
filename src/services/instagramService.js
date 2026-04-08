@@ -35,14 +35,24 @@ function apiRequest(method, path, params = {}, body = null) {
 }
 
 async function replyToComment(commentId, message, accessToken) {
-  return apiRequest('POST', `/${commentId}/replies`, { access_token: accessToken }, { message });
+  console.log(`[IG Service] Replying to comment ${commentId}`);
+  console.log(`[IG Service] Message: "${message}"`);
+  console.log(`[IG Service] Token: ${accessToken ? accessToken.substring(0, 15) + '...' : 'MISSING!'}`);
+  const result = await apiRequest('POST', `/${commentId}/replies`, { access_token: accessToken }, { message });
+  console.log(`[IG Service] ✅ Reply sent. Response:`, JSON.stringify(result));
+  return result;
 }
 
 async function sendDM(recipientId, message, pageId, accessToken) {
-  return apiRequest('POST', `/${pageId}/messages`, { access_token: accessToken }, {
+  console.log(`[IG Service] Sending DM to ${recipientId} via page ${pageId}`);
+  console.log(`[IG Service] Message: "${message}"`);
+  console.log(`[IG Service] Token: ${accessToken ? accessToken.substring(0, 15) + '...' : 'MISSING!'}`);
+  const result = await apiRequest('POST', `/${pageId}/messages`, { access_token: accessToken }, {
     recipient: { id: recipientId },
     message: { text: message }
   });
+  console.log(`[IG Service] ✅ DM sent. Response:`, JSON.stringify(result));
+  return result;
 }
 
 async function verifyWebhook(token, expectedToken) {

@@ -16,16 +16,33 @@ const ALLOWED_KEYS = [
   'tiktok_client_secret'
 ];
 
-// GET all settings (mask API key)
+// ENV var mapping (same as oauth.js)
+const ENV_MAP = {
+  meta_app_id:          'META_APP_ID',
+  meta_app_secret:      'META_APP_SECRET',
+  tiktok_client_key:    'TIKTOK_CLIENT_KEY',
+  tiktok_client_secret: 'TIKTOK_CLIENT_SECRET',
+  anthropic_api_key:    'ANTHROPIC_API_KEY',
+};
+
+// Effective value: ENV overrides DB
+function effectiveValue(key, dbValue) {
+  const envKey = ENV_MAP[key];
+  if (envKey && process.env[envKey]) return process.env[envKey];
+  return dbValue;
+}
+
+// GET all settings (mask secrets, show effective values)
 router.get('/', (req, res) => {
   const rows = db.prepare('SELECT key, value FROM settings').all();
   const settings = {};
   for (const row of rows) {
+    const val = effectiveValue(row.key, row.value);
     const MASKED = ['anthropic_api_key', 'meta_app_secret', 'tiktok_client_secret'];
-    if (MASKED.includes(row.key) && row.value) {
-      settings[row.key] = row.value.substring(0, 4) + '...' + row.value.slice(-4);
+    if (MASKED.includes(row.key) && val) {
+      settings[row.key] = val.substring(0, 4) + '...' + val.slice(-4);
     } else {
-      settings[row.key] = row.value;
+      settings[row.key] = val;
     }
   }
   res.json(settings);
@@ -46,6 +63,24 @@ router.put('/', (req, res) => {
 
   updateMany(updates);
   res.json({ success: true });
+});
+
+// GET config status — for frontend to know what's ready
+router.get('/status', (req, res) => {
+  const get = (k) => {
+    const envKey = ENV_MAP[k];
+    if (envKey && process.env[envKey]) return { set: true, source: 'env' };
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(k);
+    if (row?.value) return { set: true, source: 'db' };
+    return { set: false, source: 'none' };
+  };
+  res.json({
+    meta_app_id: get('meta_app_id'),
+    meta_app_secret: get('meta_app_secret'),
+    anthropic_api_key: get('anthropic_api_key'),
+    tiktok_client_key: get('tiktok_client_key'),
+    oauth_ready: get('meta_app_id').set && get('meta_app_secret').set,
+  });
 });
 
 // POST /api/settings/chat - voice agent chat (Arabic)
