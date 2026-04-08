@@ -37,6 +37,7 @@ db.exec(`
     action_type TEXT NOT NULL CHECK(action_type IN ('reply_comment', 'reply_dm', 'both')),
     comment_template TEXT,
     dm_template TEXT,
+    target_media_id TEXT,
     is_active INTEGER DEFAULT 1,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch()),
@@ -97,5 +98,12 @@ insertSetting.run('meta_app_id', '');
 insertSetting.run('meta_app_secret', '');
 insertSetting.run('tiktok_client_key', '');
 insertSetting.run('tiktok_client_secret', '');
+
+// Migration: add target_media_id column if missing
+try {
+  db.exec('ALTER TABLE rules ADD COLUMN target_media_id TEXT');
+} catch (e) {
+  // Column already exists
+}
 
 module.exports = db;

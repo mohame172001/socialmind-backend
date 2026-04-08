@@ -70,6 +70,9 @@ async function handleComment(data, pageId) {
   ).all(account.id);
 
   for (const rule of rules) {
+    // Skip if rule targets a specific post and this comment is on a different post
+    if (rule.target_media_id && rule.target_media_id !== mediaId) continue;
+
     const matches = checkRuleMatch(rule, commentText);
     if (!matches) continue;
 

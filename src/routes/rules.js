@@ -27,7 +27,7 @@ router.get('/', (req, res) => {
 
 // POST create rule
 router.post('/', (req, res) => {
-  const { account_id, name, trigger_type, keywords, action_type, comment_template, dm_template } = req.body;
+  const { account_id, name, trigger_type, keywords, action_type, comment_template, dm_template, target_media_id } = req.body;
 
   if (!account_id || !name || !trigger_type || !action_type) {
     return res.status(400).json({ error: 'account_id, name, trigger_type, action_type are required' });
@@ -38,16 +38,16 @@ router.post('/', (req, res) => {
 
   const id = uuidv4();
   db.prepare(`
-    INSERT INTO rules (id, account_id, name, trigger_type, keywords, action_type, comment_template, dm_template)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, account_id, name, trigger_type, JSON.stringify(keywords || []), action_type, comment_template || null, dm_template || null);
+    INSERT INTO rules (id, account_id, name, trigger_type, keywords, action_type, comment_template, dm_template, target_media_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, account_id, name, trigger_type, JSON.stringify(keywords || []), action_type, comment_template || null, dm_template || null, target_media_id || null);
 
-  res.status(201).json({ id, account_id, name, trigger_type, keywords: keywords || [], action_type, is_active: 1 });
+  res.status(201).json({ id, account_id, name, trigger_type, keywords: keywords || [], action_type, target_media_id: target_media_id || null, is_active: 1 });
 });
 
 // PUT update rule
 router.put('/:id', (req, res) => {
-  const { name, trigger_type, keywords, action_type, comment_template, dm_template, is_active } = req.body;
+  const { name, trigger_type, keywords, action_type, comment_template, dm_template, target_media_id, is_active } = req.body;
   const rule = db.prepare('SELECT * FROM rules WHERE id = ?').get(req.params.id);
   if (!rule) return res.status(404).json({ error: 'Rule not found' });
 
@@ -59,13 +59,16 @@ router.put('/:id', (req, res) => {
       action_type = COALESCE(?, action_type),
       comment_template = COALESCE(?, comment_template),
       dm_template = COALESCE(?, dm_template),
+      target_media_id = ?,
       is_active = COALESCE(?, is_active),
       updated_at = unixepoch()
     WHERE id = ?
   `).run(
     name, trigger_type,
     keywords ? JSON.stringify(keywords) : null,
-    action_type, comment_template, dm_template, is_active,
+    action_type, comment_template, dm_template,
+    target_media_id !== undefined ? (target_media_id || null) : rule.target_media_id,
+    is_active,
     req.params.id
   );
 

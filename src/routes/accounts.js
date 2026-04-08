@@ -70,6 +70,39 @@ router.delete('/:id', (req, res) => {
   res.json({ success: true });
 });
 
+// GET account media (Instagram posts)
+router.get('/:id/media', async (req, res) => {
+  const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+
+  if (account.platform !== 'instagram') {
+    return res.status(400).json({ error: 'Only Instagram accounts supported' });
+  }
+
+  try {
+    const https = require('https');
+    const url = `https://graph.facebook.com/v19.0/${account.account_id}/media?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,permalink&limit=25&access_token=${account.access_token}`;
+
+    const data = await new Promise((resolve, reject) => {
+      https.get(url, (resp) => {
+        let body = '';
+        resp.on('data', chunk => body += chunk);
+        resp.on('end', () => {
+          try {
+            const parsed = JSON.parse(body);
+            if (parsed.error) reject(new Error(parsed.error.message));
+            else resolve(parsed);
+          } catch (e) { reject(e); }
+        });
+      }).on('error', reject);
+    });
+
+    res.json(data.data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET account stats
 router.get('/:id/stats', (req, res) => {
   const bucket = Math.floor(Date.now() / 3600000);
