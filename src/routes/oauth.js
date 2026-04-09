@@ -43,6 +43,16 @@ function getRedirectUri(req) {
   return `${getBaseUrl(req)}/api/oauth/instagram/callback`;
 }
 
+// Frontend URL for post-OAuth redirect — NO localhost fallback in production
+function getFrontendUrl(stateData) {
+  // 1. Explicit ENV (always wins)
+  if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL;
+  // 2. Captured from the request that initiated the OAuth flow
+  if (stateData?.frontendOrigin) return stateData.frontendOrigin;
+  // 3. Dev-only fallback (safe: only applies when no ENV and no referer)
+  return 'http://localhost:5173';
+}
+
 function httpsRequest(url, options = {}, body = null) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
@@ -144,9 +154,12 @@ router.get('/instagram/connect', (req, res) => {
   const redirectUri = getRedirectUri(req);
   const state = uuidv4();
 
-  // Store state temporarily
+  // Capture the frontend origin from the request that initiated the flow
+  const referer = req.get('referer');
+  const frontendOrigin = referer ? new URL(referer).origin : null;
+
   if (!global.oauthStates) global.oauthStates = {};
-  global.oauthStates[state] = { createdAt: Date.now() };
+  global.oauthStates[state] = { createdAt: Date.now(), frontendOrigin };
 
   const authUrl = buildAuthUrl(appId, redirectUri, state, configId);
 
@@ -156,7 +169,7 @@ router.get('/instagram/connect', (req, res) => {
   console.log('[OAuth] Meta App ID:', appId);
   console.log('[OAuth] Config ID:', configId || '(none — standard flow)');
   console.log('[OAuth] Redirect URI:', redirectUri);
-  console.log('[OAuth] Scopes:', META_OAUTH_SCOPES);
+  console.log('[OAuth] Frontend origin:', frontendOrigin || '(no referer)');
   console.log('[OAuth] Auth URL:', authUrl);
   console.log('====================================');
 
@@ -167,19 +180,20 @@ router.get('/instagram/connect', (req, res) => {
 router.get('/instagram/callback', async (req, res) => {
   const { code, state, error } = req.query;
 
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const stateData = global.oauthStates?.[state];
+  const frontendUrl = getFrontendUrl(stateData);
 
   console.log('[OAuth][CALLBACK] code:', code ? `${code.substring(0, 20)}...` : 'MISSING');
   console.log('[OAuth][CALLBACK] state:', state);
   console.log('[OAuth][CALLBACK] error:', error || 'none');
+  console.log('[OAuth][CALLBACK] frontendUrl:', frontendUrl);
 
   if (error) {
     console.log('[OAuth][CALLBACK] ❌ Meta returned error:', error);
     return res.redirect(`${frontendUrl}/accounts?oauth_error=${encodeURIComponent(error)}`);
   }
 
-  // Validate state
-  if (!global.oauthStates || !global.oauthStates[state]) {
+  if (!stateData) {
     console.log('[OAuth][CALLBACK] ❌ Invalid state token');
     return res.redirect(`${frontendUrl}/accounts?oauth_error=invalid_state`);
   }
@@ -284,8 +298,11 @@ router.get('/tiktok/connect', (req, res) => {
   const state = uuidv4();
   const scope = encodeURIComponent('user.info.basic,video.list,comment.list,comment.create');
 
+  const referer = req.get('referer');
+  const frontendOrigin = referer ? new URL(referer).origin : null;
+
   if (!global.oauthStates) global.oauthStates = {};
-  global.oauthStates[state] = { createdAt: Date.now() };
+  global.oauthStates[state] = { createdAt: Date.now(), frontendOrigin };
 
   const authUrl = `https://www.tiktok.com/v2/auth/authorize?client_key=${clientKey}&response_type=code&scope=${scope}&redirect_uri=${redirectUri}&state=${state}`;
   res.redirect(authUrl);
@@ -293,11 +310,12 @@ router.get('/tiktok/connect', (req, res) => {
 
 router.get('/tiktok/callback', async (req, res) => {
   const { code, state, error } = req.query;
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const stateData = global.oauthStates?.[state];
+  const frontendUrl = getFrontendUrl(stateData);
 
   if (error) return res.redirect(`${frontendUrl}/accounts?oauth_error=${encodeURIComponent(error)}`);
 
-  if (!global.oauthStates || !global.oauthStates[state]) {
+  if (!stateData) {
     return res.redirect(`${frontendUrl}/accounts?oauth_error=invalid_state`);
   }
   delete global.oauthStates[state];

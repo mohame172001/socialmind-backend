@@ -85,6 +85,7 @@ router.put('/', (req, res) => {
 });
 
 // GET config status — for frontend to know what's ready
+// Also provides canonical URLs computed by backend (single source of truth)
 router.get('/status', (req, res) => {
   const get = (k) => {
     const envKey = ENV_MAP[k];
@@ -93,6 +94,12 @@ router.get('/status', (req, res) => {
     if (row?.value) return { set: true, source: 'db' };
     return { set: false, source: 'none' };
   };
+
+  // Compute canonical backend URL (same logic as oauth.js getBaseUrl)
+  const backendUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : `${req.protocol}://${req.get('host')}`;
+
   res.json({
     meta_app_id: get('meta_app_id'),
     meta_app_secret: get('meta_app_secret'),
@@ -100,6 +107,10 @@ router.get('/status', (req, res) => {
     anthropic_api_key: get('anthropic_api_key'),
     tiktok_client_key: get('tiktok_client_key'),
     oauth_ready: get('meta_app_id').set && get('meta_app_secret').set,
+    // Canonical URLs computed by backend — frontend must display these, not construct its own
+    canonical_redirect_uri: `${backendUrl}/api/oauth/instagram/callback`,
+    canonical_app_domain: new URL(backendUrl).hostname,
+    canonical_webhook_url: `${backendUrl}/webhooks/instagram`,
   });
 });
 
