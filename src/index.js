@@ -43,6 +43,9 @@ app.use('/api/agent', require('./routes/agent'));
 app.use('/webhooks/instagram', require('./webhooks/instagram'));
 app.use('/webhooks/tiktok', require('./webhooks/tiktok'));
 
+// Debug / test routes (protected by secret)
+app.use('/debug', require('./routes/debug'));
+
 // Webhook info endpoint
 app.get('/webhooks', (req, res) => {
   const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
