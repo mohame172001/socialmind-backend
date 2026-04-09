@@ -48,21 +48,38 @@ router.get('/', (req, res) => {
   res.json(settings);
 });
 
+// Secret keys — NEVER overwrite with empty string
+const SECRET_KEYS = ['anthropic_api_key', 'meta_app_secret', 'tiktok_client_secret'];
+
 // PUT update settings
 router.put('/', (req, res) => {
   const updates = req.body;
   const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, unixepoch())');
 
+  let updatedKeys = [];
+  let skippedKeys = [];
+
   const updateMany = db.transaction((updates) => {
     for (const [key, value] of Object.entries(updates)) {
-      if (ALLOWED_KEYS.includes(key)) {
-        stmt.run(key, String(value));
+      if (!ALLOWED_KEYS.includes(key)) continue;
+
+      const strVal = String(value).trim();
+
+      // Skip empty values for secret keys — don't overwrite saved secrets with ""
+      if (SECRET_KEYS.includes(key) && !strVal) {
+        skippedKeys.push(key);
+        continue;
       }
+
+      stmt.run(key, strVal);
+      updatedKeys.push(key);
     }
   });
 
   updateMany(updates);
-  res.json({ success: true });
+  console.log('[Settings] Updated:', updatedKeys.join(', ') || 'none');
+  if (skippedKeys.length) console.log('[Settings] Skipped (empty secret):', skippedKeys.join(', '));
+  res.json({ success: true, updated: updatedKeys, skipped_empty_secrets: skippedKeys });
 });
 
 // GET config status — for frontend to know what's ready
