@@ -5,10 +5,16 @@ const db = require('../db');
 
 const router = express.Router();
 
+// ─────────────────────────────────────────────
+// Centralized Meta OAuth Configuration
+// ─────────────────────────────────────────────
+const META_API_VERSION = 'v22.0';
+
 // ENV var mapping: settings DB key → process.env key
 const ENV_MAP = {
   meta_app_id:          'META_APP_ID',
   meta_app_secret:      'META_APP_SECRET',
+  meta_login_config_id: 'META_LOGIN_CONFIG_ID',
   tiktok_client_key:    'TIKTOK_CLIENT_KEY',
   tiktok_client_secret: 'TIKTOK_CLIENT_SECRET',
   anthropic_api_key:    'ANTHROPIC_API_KEY',
@@ -22,6 +28,19 @@ function getSetting(key) {
   }
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
   return (row && row.value) ? row.value : null;
+}
+
+// Canonical production base URL — single source of truth
+function getBaseUrl(req) {
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+    return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+  }
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+// Canonical redirect URI — single source of truth, used everywhere
+function getRedirectUri(req) {
+  return `${getBaseUrl(req)}/api/oauth/instagram/callback`;
 }
 
 function httpsRequest(url, options = {}, body = null) {
@@ -50,7 +69,7 @@ function httpsRequest(url, options = {}, body = null) {
 // INSTAGRAM OAuth (via Facebook Login)
 // ─────────────────────────────────────────────
 
-// Valid Meta OAuth scopes (NO deprecated manage_pages!)
+// Valid Meta OAuth scopes
 const META_OAUTH_SCOPES = [
   'instagram_basic',
   'instagram_manage_comments',
@@ -60,163 +79,163 @@ const META_OAUTH_SCOPES = [
   'pages_manage_metadata'
 ].join(',');
 
-// Diagnostic endpoint — shows the exact auth URL without redirecting
+// Build the Facebook OAuth authorization URL
+// Supports BOTH standard Facebook Login and Facebook Login for Business
+function buildAuthUrl(appId, redirectUri, state, configId) {
+  if (configId) {
+    // Facebook Login for Business — uses config_id (redirect_uri and scopes are inside the configuration)
+    return `https://www.facebook.com/${META_API_VERSION}/dialog/oauth?client_id=${appId}&config_id=${configId}&state=${state}&response_type=code`;
+  }
+  // Standard Facebook Login — redirect_uri and scope in URL
+  const encodedRedirect = encodeURIComponent(redirectUri);
+  const encodedScope = encodeURIComponent(META_OAUTH_SCOPES);
+  return `https://www.facebook.com/${META_API_VERSION}/dialog/oauth?client_id=${appId}&redirect_uri=${encodedRedirect}&scope=${encodedScope}&state=${state}&response_type=code`;
+}
+
+// ── Diagnostic endpoint ─────────────────────────────────────────────────────
 router.get('/instagram/debug-auth-url', (req, res) => {
   const appId = getSetting('meta_app_id');
+  const configId = getSetting('meta_login_config_id');
+  const redirectUri = getRedirectUri(req);
+
   if (!appId) {
     return res.json({
       error: 'Meta App ID not configured',
       meta_app_id: null,
-      note: 'OAuth flow will NOT run — frontend opens manual form instead'
     });
   }
 
-  const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-    : `${req.protocol}://${req.get('host')}`;
-
-  const redirectUri = `${baseUrl}/api/oauth/instagram/callback`;
-  const scopeRaw = META_OAUTH_SCOPES;
-  const scopeEncoded = encodeURIComponent(scopeRaw);
-
-  const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopeEncoded}&state=DEBUG_STATE&response_type=code`;
+  const state = 'DEBUG_STATE';
+  const authUrl = buildAuthUrl(appId, redirectUri, state, configId);
 
   res.json({
     source_file: 'backend/src/routes/oauth.js',
-    source_function: 'GET /api/oauth/instagram/connect',
+    meta_api_version: META_API_VERSION,
     meta_app_id: appId,
+    meta_login_config_id: configId || null,
+    flow_type: configId ? 'facebook_login_for_business' : 'standard_facebook_login',
     redirect_uri: redirectUri,
-    scope_raw: scopeRaw,
-    scope_encoded: scopeEncoded,
-    scope_list: scopeRaw.split(','),
-    contains_manage_pages: scopeRaw.includes('manage_pages'),
+    scope_raw: META_OAUTH_SCOPES,
+    scope_list: META_OAUTH_SCOPES.split(','),
     final_auth_url: authUrl,
-    runtime_timestamp: new Date().toISOString()
+    callback_route: '/api/oauth/instagram/callback',
+    base_url_source: process.env.RAILWAY_PUBLIC_DOMAIN ? 'RAILWAY_PUBLIC_DOMAIN env' : 'req.protocol + req.host',
+    railway_public_domain: process.env.RAILWAY_PUBLIC_DOMAIN || '(not set)',
+    runtime_timestamp: new Date().toISOString(),
+    meta_dashboard_checklist: {
+      '1_app_domains': `Add: ${new URL(redirectUri).hostname}`,
+      '2_valid_oauth_redirect_uris': redirectUri,
+      '3_client_oauth_login': 'ON',
+      '4_web_oauth_login': 'ON',
+      '5_enforce_https': 'ON',
+      '6_if_facebook_login_for_business': 'Create a Login Configuration with the redirect URI and scopes, then set META_LOGIN_CONFIG_ID env var or meta_login_config_id setting'
+    }
   });
 });
 
-// Step 1: Redirect user to Facebook OAuth
+// ── Step 1: Redirect user to Facebook OAuth ─────────────────────────────────
 router.get('/instagram/connect', (req, res) => {
   const appId = getSetting('meta_app_id');
   if (!appId) {
     return res.status(400).json({ error: 'Meta App ID not configured. Go to Settings first.' });
   }
 
-  const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-    : `${req.protocol}://${req.get('host')}`;
-
-  const redirectUri = encodeURIComponent(`${baseUrl}/api/oauth/instagram/callback`);
-  const scope = encodeURIComponent(META_OAUTH_SCOPES);
+  const configId = getSetting('meta_login_config_id');
+  const redirectUri = getRedirectUri(req);
   const state = uuidv4();
 
-  // Store state temporarily (simple in-memory for now)
+  // Store state temporarily
   if (!global.oauthStates) global.oauthStates = {};
   global.oauthStates[state] = { createdAt: Date.now() };
 
-  const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}&state=${state}&response_type=code`;
+  const authUrl = buildAuthUrl(appId, redirectUri, state, configId);
 
-  // ===== RUNTIME LOGGING =====
-  console.log('========== OAUTH DEBUG ==========');
-  console.log('[OAuth] Source: backend/src/routes/oauth.js → GET /instagram/connect');
+  console.log('========== OAUTH CONNECT ==========');
+  console.log('[OAuth] API Version:', META_API_VERSION);
+  console.log('[OAuth] Flow:', configId ? 'Facebook Login for Business (config_id)' : 'Standard Facebook Login');
   console.log('[OAuth] Meta App ID:', appId);
-  console.log('[OAuth] Scope (raw):', META_OAUTH_SCOPES);
-  console.log('[OAuth] Scope (encoded):', scope);
-  console.log('[OAuth] Contains manage_pages:', META_OAUTH_SCOPES.includes('manage_pages'));
-  console.log('[OAuth] Redirect URI:', decodeURIComponent(redirectUri));
-  console.log('[OAuth] FULL AUTH URL:', authUrl);
-  console.log('=================================');
+  console.log('[OAuth] Config ID:', configId || '(none — standard flow)');
+  console.log('[OAuth] Redirect URI:', redirectUri);
+  console.log('[OAuth] Scopes:', META_OAUTH_SCOPES);
+  console.log('[OAuth] Auth URL:', authUrl);
+  console.log('====================================');
 
   res.redirect(authUrl);
 });
 
-// Step 2: Handle callback from Facebook
+// ── Step 2: Handle callback from Facebook ───────────────────────────────────
 router.get('/instagram/callback', async (req, res) => {
   const { code, state, error } = req.query;
 
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-  console.log('[OAuth][STEP 2] Callback received');
-  console.log('[OAuth][STEP 2] code:', code ? `${code.substring(0, 20)}...` : 'MISSING');
-  console.log('[OAuth][STEP 2] state:', state);
-  console.log('[OAuth][STEP 2] error:', error || 'none');
+  console.log('[OAuth][CALLBACK] code:', code ? `${code.substring(0, 20)}...` : 'MISSING');
+  console.log('[OAuth][CALLBACK] state:', state);
+  console.log('[OAuth][CALLBACK] error:', error || 'none');
 
   if (error) {
-    console.log('[OAuth][STEP 2] ❌ Meta returned error:', error);
+    console.log('[OAuth][CALLBACK] ❌ Meta returned error:', error);
     return res.redirect(`${frontendUrl}/accounts?oauth_error=${encodeURIComponent(error)}`);
   }
 
   // Validate state
   if (!global.oauthStates || !global.oauthStates[state]) {
-    console.log('[OAuth][STEP 2] ❌ Invalid state token');
+    console.log('[OAuth][CALLBACK] ❌ Invalid state token');
     return res.redirect(`${frontendUrl}/accounts?oauth_error=invalid_state`);
   }
   delete global.oauthStates[state];
-  console.log('[OAuth][STEP 2] ✅ State validated');
 
   try {
     const appId = getSetting('meta_app_id');
     const appSecret = getSetting('meta_app_secret');
-    console.log('[OAuth][STEP 3] App ID:', appId);
-    console.log('[OAuth][STEP 3] App Secret:', appSecret ? `${appSecret.substring(0, 6)}...` : 'MISSING!');
+    const redirectUri = getRedirectUri(req);
 
-    const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-      : `${req.protocol}://${req.get('host')}`;
-
-    const redirectUri = `${baseUrl}/api/oauth/instagram/callback`;
-    console.log('[OAuth][STEP 3] Redirect URI for token exchange:', redirectUri);
+    console.log('[OAuth][TOKEN] App ID:', appId);
+    console.log('[OAuth][TOKEN] App Secret:', appSecret ? `${appSecret.substring(0, 6)}...` : 'MISSING!');
+    console.log('[OAuth][TOKEN] Redirect URI:', redirectUri);
 
     // Exchange code for access token
-    console.log('[OAuth][STEP 4] Exchanging code for short-lived token...');
-    const tokenUrl = `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&redirect_uri=${encodeURIComponent(redirectUri)}&code=${code}`;
+    const tokenUrl = `https://graph.facebook.com/${META_API_VERSION}/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&redirect_uri=${encodeURIComponent(redirectUri)}&code=${code}`;
     const tokenData = await httpsRequest(tokenUrl);
 
     if (!tokenData.access_token) {
-      console.log('[OAuth][STEP 4] ❌ Token exchange failed:', JSON.stringify(tokenData));
+      console.log('[OAuth][TOKEN] ❌ Failed:', JSON.stringify(tokenData));
       throw new Error(tokenData.error?.message || 'Failed to get access token');
     }
 
     const shortToken = tokenData.access_token;
-    console.log('[OAuth][STEP 4] ✅ Got short-lived token:', `${shortToken.substring(0, 20)}...`);
+    console.log('[OAuth][TOKEN] ✅ Short-lived token:', `${shortToken.substring(0, 20)}...`);
 
     // Exchange for long-lived token
-    console.log('[OAuth][STEP 5] Exchanging for long-lived token...');
-    const longTokenUrl = `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortToken}`;
+    const longTokenUrl = `https://graph.facebook.com/${META_API_VERSION}/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortToken}`;
     const longTokenData = await httpsRequest(longTokenUrl);
     const longToken = longTokenData.access_token || shortToken;
-    console.log('[OAuth][STEP 5] ✅ Long-lived token:', `${longToken.substring(0, 20)}...`);
-    if (longTokenData.expires_in) console.log('[OAuth][STEP 5] Expires in:', longTokenData.expires_in, 'seconds');
+    console.log('[OAuth][TOKEN] ✅ Long-lived token:', `${longToken.substring(0, 20)}...`);
 
     // Get user's Facebook Pages
-    console.log('[OAuth][STEP 6] Fetching Facebook Pages...');
-    const pagesData = await httpsRequest(`https://graph.facebook.com/v19.0/me/accounts?access_token=${longToken}&fields=id,name,instagram_business_account`);
-    console.log('[OAuth][STEP 6] Pages response:', JSON.stringify(pagesData));
+    const pagesData = await httpsRequest(`https://graph.facebook.com/${META_API_VERSION}/me/accounts?access_token=${longToken}&fields=id,name,instagram_business_account`);
 
     if (!pagesData.data || pagesData.data.length === 0) {
       throw new Error('No Facebook Pages found. Make sure your Instagram is connected to a Facebook Page.');
     }
-    console.log('[OAuth][STEP 6] ✅ Found', pagesData.data.length, 'page(s)');
+    console.log('[OAuth][PAGES] Found', pagesData.data.length, 'page(s)');
 
     let connectedCount = 0;
 
     for (const page of pagesData.data) {
-      console.log(`[OAuth][STEP 7] Page: "${page.name}" (ID: ${page.id}) → IG: ${page.instagram_business_account ? page.instagram_business_account.id : 'NONE'}`);
+      console.log(`[OAuth][PAGE] "${page.name}" (${page.id}) → IG: ${page.instagram_business_account ? page.instagram_business_account.id : 'NONE'}`);
       if (!page.instagram_business_account) continue;
 
       const igId = page.instagram_business_account.id;
 
       // Get page-specific token
-      console.log(`[OAuth][STEP 8] Getting Page Access Token for page ${page.id}...`);
-      const pageTokenData = await httpsRequest(`https://graph.facebook.com/v19.0/${page.id}?fields=access_token&access_token=${longToken}`);
+      const pageTokenData = await httpsRequest(`https://graph.facebook.com/${META_API_VERSION}/${page.id}?fields=access_token&access_token=${longToken}`);
       const pageToken = pageTokenData.access_token || longToken;
-      console.log(`[OAuth][STEP 8] ✅ Page token: ${pageToken.substring(0, 20)}...`);
 
       // Get Instagram username
-      console.log(`[OAuth][STEP 9] Fetching IG username for ${igId}...`);
-      const igData = await httpsRequest(`https://graph.facebook.com/v19.0/${igId}?fields=username,name&access_token=${pageToken}`);
+      const igData = await httpsRequest(`https://graph.facebook.com/${META_API_VERSION}/${igId}?fields=username,name&access_token=${pageToken}`);
       const username = igData.username || igData.name || `ig_${igId}`;
-      console.log(`[OAuth][STEP 9] ✅ IG username: @${username}`);
+      console.log(`[OAuth][IG] @${username} (${igId})`);
 
       // Upsert account
       const id = uuidv4();
@@ -232,9 +251,9 @@ router.get('/instagram/callback', async (req, res) => {
             updated_at = unixepoch()
         `).run(id, igId, username, pageToken, page.id);
         connectedCount++;
-        console.log(`[OAuth][STEP 10] ✅ Saved account: @${username} (IG: ${igId}, Page: ${page.id})`);
+        console.log(`[OAuth][SAVE] ✅ @${username}`);
       } catch (e) {
-        console.error(`[OAuth][STEP 10] ❌ Error saving account:`, e.message);
+        console.error(`[OAuth][SAVE] ❌`, e.message);
       }
     }
 
@@ -242,10 +261,10 @@ router.get('/instagram/callback', async (req, res) => {
       throw new Error('No Instagram Business accounts found. Make sure your Instagram is set to Business/Creator mode and linked to a Facebook Page.');
     }
 
-    console.log(`[OAuth] ✅✅✅ SUCCESS! Connected ${connectedCount} account(s)`);
+    console.log(`[OAuth] ✅ Connected ${connectedCount} account(s)`);
     res.redirect(`${frontendUrl}/accounts?oauth_success=${connectedCount}`);
   } catch (err) {
-    console.error('[OAuth] ❌❌❌ FAILED:', err.message);
+    console.error('[OAuth] ❌ FAILED:', err.message);
     res.redirect(`${frontendUrl}/accounts?oauth_error=${encodeURIComponent(err.message)}`);
   }
 });
@@ -260,10 +279,7 @@ router.get('/tiktok/connect', (req, res) => {
     return res.status(400).json({ error: 'TikTok Client Key not configured. Go to Settings first.' });
   }
 
-  const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-    : `${req.protocol}://${req.get('host')}`;
-
+  const baseUrl = getBaseUrl(req);
   const redirectUri = encodeURIComponent(`${baseUrl}/api/oauth/tiktok/callback`);
   const state = uuidv4();
   const scope = encodeURIComponent('user.info.basic,video.list,comment.list,comment.create');
@@ -289,14 +305,9 @@ router.get('/tiktok/callback', async (req, res) => {
   try {
     const clientKey = getSetting('tiktok_client_key');
     const clientSecret = getSetting('tiktok_client_secret');
-
-    const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-      : `${req.protocol}://${req.get('host')}`;
-
+    const baseUrl = getBaseUrl(req);
     const redirectUri = `${baseUrl}/api/oauth/tiktok/callback`;
 
-    // Exchange code for token
     const body = `code=${code}&client_key=${clientKey}&client_secret=${clientSecret}&grant_type=authorization_code&redirect_uri=${encodeURIComponent(redirectUri)}`;
     const tokenData = await httpsRequest('https://open.tiktokapis.com/v2/oauth/token/', {
       method: 'POST',
@@ -307,7 +318,6 @@ router.get('/tiktok/callback', async (req, res) => {
       throw new Error(tokenData.error_description || 'Failed to get TikTok access token');
     }
 
-    // Get user info
     const userRes = await httpsRequest('https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,username', {
       headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
     });

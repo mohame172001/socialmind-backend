@@ -81,7 +81,7 @@ router.get('/:id/media', async (req, res) => {
 
   try {
     const https = require('https');
-    const url = `https://graph.facebook.com/v19.0/${account.account_id}/media?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,permalink&limit=25&access_token=${account.access_token}`;
+    const url = `https://graph.facebook.com/v22.0/${account.account_id}/media?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,permalink&limit=25&access_token=${account.access_token}`;
 
     const data = await new Promise((resolve, reject) => {
       https.get(url, (resp) => {

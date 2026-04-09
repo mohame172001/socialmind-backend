@@ -102,11 +102,12 @@ insertSetting.run('tiktok_client_secret', '');
 
 // Auto-sync: if ENV vars are set, overwrite DB settings (handles Railway redeploys)
 const ENV_TO_SETTINGS = {
-  META_APP_ID:          'meta_app_id',
-  META_APP_SECRET:      'meta_app_secret',
-  TIKTOK_CLIENT_KEY:    'tiktok_client_key',
-  TIKTOK_CLIENT_SECRET: 'tiktok_client_secret',
-  ANTHROPIC_API_KEY:    'anthropic_api_key',
+  META_APP_ID:            'meta_app_id',
+  META_APP_SECRET:        'meta_app_secret',
+  META_LOGIN_CONFIG_ID:   'meta_login_config_id',
+  TIKTOK_CLIENT_KEY:      'tiktok_client_key',
+  TIKTOK_CLIENT_SECRET:   'tiktok_client_secret',
+  ANTHROPIC_API_KEY:      'anthropic_api_key',
 };
 
 const upsertSetting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = unixepoch()');

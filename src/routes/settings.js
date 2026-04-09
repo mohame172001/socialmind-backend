@@ -12,17 +12,19 @@ const ALLOWED_KEYS = [
   'user_cooldown_minutes',
   'meta_app_id',
   'meta_app_secret',
+  'meta_login_config_id',
   'tiktok_client_key',
   'tiktok_client_secret'
 ];
 
 // ENV var mapping (same as oauth.js)
 const ENV_MAP = {
-  meta_app_id:          'META_APP_ID',
-  meta_app_secret:      'META_APP_SECRET',
-  tiktok_client_key:    'TIKTOK_CLIENT_KEY',
-  tiktok_client_secret: 'TIKTOK_CLIENT_SECRET',
-  anthropic_api_key:    'ANTHROPIC_API_KEY',
+  meta_app_id:            'META_APP_ID',
+  meta_app_secret:        'META_APP_SECRET',
+  meta_login_config_id:   'META_LOGIN_CONFIG_ID',
+  tiktok_client_key:      'TIKTOK_CLIENT_KEY',
+  tiktok_client_secret:   'TIKTOK_CLIENT_SECRET',
+  anthropic_api_key:      'ANTHROPIC_API_KEY',
 };
 
 // Effective value: ENV overrides DB
@@ -94,6 +96,7 @@ router.get('/status', (req, res) => {
   res.json({
     meta_app_id: get('meta_app_id'),
     meta_app_secret: get('meta_app_secret'),
+    meta_login_config_id: get('meta_login_config_id'),
     anthropic_api_key: get('anthropic_api_key'),
     tiktok_client_key: get('tiktok_client_key'),
     oauth_ready: get('meta_app_id').set && get('meta_app_secret').set,

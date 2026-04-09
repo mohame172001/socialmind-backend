@@ -1,6 +1,6 @@
 const https = require('https');
 
-const BASE_URL = 'https://graph.facebook.com/v19.0';
+const BASE_URL = 'https://graph.facebook.com/v22.0';
 
 function apiRequest(method, path, params = {}, body = null) {
   return new Promise((resolve, reject) => {
