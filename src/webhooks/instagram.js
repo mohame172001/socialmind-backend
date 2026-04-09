@@ -35,27 +35,35 @@ router.get('/history', (req, res) => {
 });
 
 // ── Webhook verification (GET) ───────────────────────────────────────────────
+// NOTE: Express qs parser may parse "hub.mode" as either:
+//   req.query['hub.mode']   (allowDots=false, default)
+//   req.query.hub.mode      (allowDots=true, some environments)
+// We handle BOTH to be safe across all deployments.
 router.get('/', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
+  const q = req.query;
+  const mode      = q['hub.mode']         || q.hub?.mode;
+  const token     = q['hub.verify_token'] || q.hub?.verify_token;
+  const challenge = q['hub.challenge']    || q.hub?.challenge;
 
   console.log('═══════════════════════════════════════');
   console.log('[Webhook][GET] Verification request');
+  console.log('[Webhook][GET] Full query:', JSON.stringify(q));
   console.log('[Webhook][GET] mode:', mode);
   console.log('[Webhook][GET] token:', token);
   console.log('[Webhook][GET] challenge:', challenge);
   console.log('[Webhook][GET] expected token:', VERIFY_TOKEN);
   console.log('[Webhook][GET] match:', token === VERIFY_TOKEN);
+  console.log('[Webhook][GET] VERIFY_TOKEN source:', process.env.INSTAGRAM_VERIFY_TOKEN ? 'ENV' : 'fallback');
   console.log('═══════════════════════════════════════');
 
-  logWebhookEvent('verification', { mode, token_match: token === VERIFY_TOKEN, challenge });
+  logWebhookEvent('verification', { mode, token_match: token === VERIFY_TOKEN, challenge, raw_query: q });
 
   if (mode === 'subscribe' && token === VERIFY_TOKEN) {
     console.log('[Webhook][GET] ✅ Verified — sending challenge back');
-    res.status(200).send(challenge);
+    res.status(200).send(String(challenge));
   } else {
     console.log('[Webhook][GET] ❌ Verification FAILED');
+    console.log('[Webhook][GET] Reason:', !mode ? 'mode missing' : mode !== 'subscribe' ? `mode="${mode}" not "subscribe"` : `token mismatch: got "${token}" expected "${VERIFY_TOKEN}"`);
     res.status(403).json({ error: 'Verification failed' });
   }
 });
