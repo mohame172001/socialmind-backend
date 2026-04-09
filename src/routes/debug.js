@@ -171,9 +171,14 @@ router.post('/test-comment', async (req, res) => {
 
         try {
           if (action.actionType === 'comment_reply') {
-            await instagramService.replyToComment(finalCommentId, responseText, account.access_token);
+            await instagramService.replyToComment(finalCommentId, responseText, account);
           } else if (action.actionType === 'dm') {
-            await instagramService.sendDM(user_id, responseText, account.page_id || account.account_id, account.access_token);
+            await instagramService.sendDM({
+              commenterId: user_id,
+              commentId: finalCommentId,
+              message: responseText,
+              account,
+            });
           }
 
           db.prepare('UPDATE activity_log SET status = ?, response_text = ?, executed_at = unixepoch() WHERE id = ?')
@@ -196,9 +201,14 @@ router.post('/test-comment', async (req, res) => {
             console.log(`[TEST_EXECUTE] ▶️ Executing ${action.actionType} for log ${logId}`);
             try {
               if (action.actionType === 'comment_reply') {
-                await instagramService.replyToComment(finalCommentId, responseText, account.access_token);
+                await instagramService.replyToComment(finalCommentId, responseText, account);
               } else {
-                await instagramService.sendDM(user_id, responseText, account.page_id || account.account_id, account.access_token);
+                await instagramService.sendDM({
+                  commenterId: user_id,
+                  commentId: finalCommentId,
+                  message: responseText,
+                  account,
+                });
               }
               db.prepare('UPDATE activity_log SET status = ?, response_text = ?, executed_at = unixepoch() WHERE id = ?')
                 .run('sent', responseText, logId);
@@ -239,7 +249,7 @@ router.post('/test-comment', async (req, res) => {
 // GET /debug/status — quick system health for debugging
 // ══════════════════════════════════════════════════════════════════════════════
 router.get('/status', (req, res) => {
-  const accounts = db.prepare('SELECT id, platform, username, account_id, page_id, is_active FROM accounts').all();
+  const accounts = db.prepare('SELECT id, platform, username, account_id, page_id, auth_type, is_active FROM accounts').all();
   const rules = db.prepare('SELECT id, name, account_id, trigger_type, action_type, is_active FROM rules').all();
   const recentActivity = db.prepare('SELECT id, event_type, platform, commenter_username, comment_text, action_taken, status, created_at FROM activity_log ORDER BY created_at DESC LIMIT 10').all();
   const queueStatus = queue.getStats ? queue.getStats() : 'unknown';

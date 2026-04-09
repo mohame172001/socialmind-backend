@@ -299,10 +299,15 @@ async function scheduleAction({ account, rule, commentId, commentText, commenter
 
       if (actionType === 'comment_reply') {
         console.log(`[execute] Calling replyToComment(${commentId})...`);
-        await instagramService.replyToComment(commentId, responseText, account.access_token);
+        await instagramService.replyToComment(commentId, responseText, account);
       } else if (actionType === 'dm') {
-        console.log(`[execute] Calling sendDM(${commenterId}, page: ${account.page_id || account.account_id})...`);
-        await instagramService.sendDM(commenterId, responseText, account.page_id || account.account_id, account.access_token);
+        console.log(`[execute] Calling sendDM(comment: ${commentId}, user: ${commenterId}, sender: ${account.page_id || account.account_id})...`);
+        await instagramService.sendDM({
+          commenterId,
+          commentId,
+          message: responseText,
+          account,
+        });
       }
 
       db.prepare('UPDATE activity_log SET response_text = ? WHERE id = ?').run(responseText, logId);

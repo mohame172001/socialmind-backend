@@ -1,13 +1,14 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
+const instagramService = require('../services/instagramService');
 
 const router = express.Router();
 
 // GET all accounts
 router.get('/', (req, res) => {
   const accounts = db.prepare(`
-    SELECT id, platform, account_id, username, page_id, is_active, created_at,
+    SELECT id, platform, account_id, username, page_id, auth_type, is_active, created_at,
            token_expiry, CASE WHEN access_token != '' THEN 1 ELSE 0 END as has_token
     FROM accounts ORDER BY created_at DESC
   `).all();
@@ -16,7 +17,7 @@ router.get('/', (req, res) => {
 
 // POST create account
 router.post('/', (req, res) => {
-  const { platform, account_id, username, access_token, page_id, token_expiry } = req.body;
+  const { platform, account_id, username, access_token, page_id, token_expiry, auth_type } = req.body;
 
   if (!platform || !account_id || !username || !access_token) {
     return res.status(400).json({ error: 'platform, account_id, username, access_token are required' });
@@ -28,10 +29,11 @@ router.post('/', (req, res) => {
 
   try {
     const id = uuidv4();
+    const finalAuthType = platform === 'instagram' ? (auth_type || 'facebook_login') : null;
     db.prepare(`
-      INSERT INTO accounts (id, platform, account_id, username, access_token, page_id, token_expiry)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, platform, account_id, username, access_token, page_id || null, token_expiry || null);
+      INSERT INTO accounts (id, platform, account_id, username, access_token, page_id, token_expiry, auth_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, platform, account_id, username, access_token, page_id || null, token_expiry || null, finalAuthType);
 
     res.status(201).json({ id, platform, account_id, username, is_active: 1 });
   } catch (err) {
@@ -45,7 +47,7 @@ router.post('/', (req, res) => {
 
 // PUT update account
 router.put('/:id', (req, res) => {
-  const { username, access_token, page_id, token_expiry, is_active } = req.body;
+  const { username, access_token, page_id, token_expiry, is_active, auth_type } = req.body;
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id);
   if (!account) return res.status(404).json({ error: 'Account not found' });
 
@@ -55,10 +57,11 @@ router.put('/:id', (req, res) => {
       access_token = COALESCE(?, access_token),
       page_id = COALESCE(?, page_id),
       token_expiry = COALESCE(?, token_expiry),
+      auth_type = COALESCE(?, auth_type),
       is_active = COALESCE(?, is_active),
       updated_at = unixepoch()
     WHERE id = ?
-  `).run(username, access_token, page_id, token_expiry, is_active, req.params.id);
+  `).run(username, access_token, page_id, token_expiry, auth_type, is_active, req.params.id);
 
   res.json({ success: true });
 });
@@ -80,24 +83,8 @@ router.get('/:id/media', async (req, res) => {
   }
 
   try {
-    const https = require('https');
-    const url = `https://graph.facebook.com/v22.0/${account.account_id}/media?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,permalink&limit=25&access_token=${account.access_token}`;
-
-    const data = await new Promise((resolve, reject) => {
-      https.get(url, (resp) => {
-        let body = '';
-        resp.on('data', chunk => body += chunk);
-        resp.on('end', () => {
-          try {
-            const parsed = JSON.parse(body);
-            if (parsed.error) reject(new Error(parsed.error.message));
-            else resolve(parsed);
-          } catch (e) { reject(e); }
-        });
-      }).on('error', reject);
-    });
-
-    res.json(data.data || []);
+    const posts = await instagramService.getMedia(account);
+    res.json(posts);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

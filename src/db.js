@@ -13,6 +13,15 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+function addColumnIfMissing(tableName, columnName, columnSql) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  const hasColumn = columns.some((column) => column.name === columnName);
+  if (!hasColumn) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnSql}`);
+    console.log(`[DB] Added missing column ${tableName}.${columnName}`);
+  }
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
@@ -22,6 +31,7 @@ db.exec(`
     access_token TEXT NOT NULL,
     token_expiry INTEGER,
     page_id TEXT,
+    auth_type TEXT DEFAULT 'facebook_login',
     is_active INTEGER DEFAULT 1,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch()),
@@ -87,6 +97,15 @@ db.exec(`
   );
 `);
 
+addColumnIfMissing('settings', 'updated_at', 'updated_at INTEGER');
+addColumnIfMissing('accounts', 'auth_type', "auth_type TEXT DEFAULT 'facebook_login'");
+
+db.prepare(`
+  UPDATE accounts
+  SET auth_type = 'facebook_login'
+  WHERE platform = 'instagram' AND (auth_type IS NULL OR auth_type = '')
+`).run();
+
 // Seed defaults — INSERT OR IGNORE only inserts if key doesn't exist
 const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
 insertSetting.run('anthropic_api_key', '');
@@ -97,6 +116,7 @@ insertSetting.run('max_replies_per_hour', '30');
 insertSetting.run('user_cooldown_minutes', '60');
 insertSetting.run('meta_app_id', '');
 insertSetting.run('meta_app_secret', '');
+insertSetting.run('meta_login_config_id', '');
 insertSetting.run('tiktok_client_key', '');
 insertSetting.run('tiktok_client_secret', '');
 
@@ -118,11 +138,6 @@ for (const [envKey, dbKey] of Object.entries(ENV_TO_SETTINGS)) {
   }
 }
 
-// Migration: add target_media_id column if missing
-try {
-  db.exec('ALTER TABLE rules ADD COLUMN target_media_id TEXT');
-} catch (e) {
-  // Column already exists
-}
+addColumnIfMissing('rules', 'target_media_id', 'target_media_id TEXT');
 
 module.exports = db;
