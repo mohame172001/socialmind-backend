@@ -7,6 +7,10 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust proxy — required for Railway/Render/Heroku (reverse proxy sets X-Forwarded-For)
+// Without this, express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+app.set('trust proxy', 1);
+
 // Security middleware
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
@@ -14,7 +18,7 @@ app.use(cors({
   credentials: true
 }));
 
-// Rate limiting
+// Rate limiting — only on /api/ routes, NOT on /webhooks/ (Meta needs unrestricted access)
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 500 });
 app.use('/api/', limiter);
 
